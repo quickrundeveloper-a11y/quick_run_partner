@@ -8,13 +8,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:firebase_auth/firebase_auth.dart';
 
 // TODO: replace with your Google Geocoding API key (enable Geocoding API in Cloud Console)
 const String kGoogleApiKey = 'AIzaSyCY7rArtF49q1sSkDDJaSmC0pLl04EKV7I';
 
 class GrocceryAccountCreate extends StatefulWidget {
-  const GrocceryAccountCreate({super.key});
+  final String driverAuthId;
+  const GrocceryAccountCreate({super.key, required this.driverAuthId});
 
   @override
   State<GrocceryAccountCreate> createState() => _GrocceryAccountCreateState();
@@ -33,6 +33,27 @@ class _GrocceryAccountCreateState extends State<GrocceryAccountCreate> {
   double? _longitude;
 
   final ImagePicker _picker = ImagePicker();
+
+  String? _restaurantId;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRestaurantIdFromPhone();
+  }
+
+  Future<void> _fetchRestaurantIdFromPhone() async {
+    final snap = await FirebaseFirestore.instance.collection('Restaurent_shop').get();
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      if (data['phone'] == widget.driverAuthId) {
+        setState(() {
+          _restaurantId = doc.id;
+        });
+        break;
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -146,16 +167,16 @@ class _GrocceryAccountCreateState extends State<GrocceryAccountCreate> {
         'created_at': FieldValue.serverTimestamp(),
       };
 
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User not logged in')));
+      final restaurantId = _restaurantId;
+      if (restaurantId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restaurant ID not resolved')));
         setState(() => _isSaving = false);
         return;
       }
 
       await FirebaseFirestore.instance
           .collection('Restaurent_shop')
-          .doc(user.uid)
+          .doc(restaurantId)
           .set(data);
 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restaurant account created successfully')));

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="60dp"
+    android:layout_height="60dp"
+    android:padding="6dp">
+
+    <ImageView
+        android:id="@+id/bubbleIcon"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:src="@drawable/qr_icon"
+        android:layout_gravity="center_horizontal"/>
+
+    <TextView
+        android:id="@+id/bubbleNewOrderText"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:padding="6dp"
+        android:text="NEW ORDER"
+        android:textAllCaps="true"
+        android:textStyle="bold"
+        android:textSize="12sp"
+        android:textColor="@android:color/white"
+        android:background="#E53935"
+        android:visibility="gone" />
+
+</FrameLayout>

@@ -2,9 +2,15 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:quick_run_driver/porter_driver/porter_home.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DriverDashboard extends StatefulWidget {
-  const DriverDashboard({Key? key}) : super(key: key);
+  final String driverAuthId;
+
+  const DriverDashboard(this.driverAuthId, {Key? key}) : super(key: key);
 
   @override
   _DriverDashboardState createState() => _DriverDashboardState();
@@ -12,44 +18,150 @@ class DriverDashboard extends StatefulWidget {
 
 class _DriverDashboardState extends State<DriverDashboard> {
   bool _isOnline = false;
-  Timer? _timer;
-  int _offlineSeconds = 0;
+  int _todayOrders = 0;
+  int _todayEarning = 0;
+  bool _isOnlineLoaded = false;
 
   @override
   void initState() {
     super.initState();
-    // Initially the driver is offline, so the timer should start.
-    _startTimer();
+    // Driver starts as ONLINE, so offline timer should not run initially.
+    _fetchTodayOrders();
+    _initOnlineState();
+  }
+
+  Future<void> _initOnlineState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool('driverIsOnline');
+
+      bool nextOnline = saved ?? false;
+
+      // If not saved locally yet, fall back to Firestore field `activeDriver`
+      if (saved == null) {
+        final snap = await FirebaseFirestore.instance
+            .collection('QuickRunDrivers')
+            .where('phone', isEqualTo: widget.driverAuthId)
+            .limit(1)
+            .get();
+        if (snap.docs.isNotEmpty) {
+          final data = snap.docs.first.data();
+          final v = data['activeDriver'];
+          if (v is bool) nextOnline = v;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isOnline = nextOnline;
+        _isOnlineLoaded = true;
+      });
+
+      // Ensure local prefs is set for future fast restores
+      await prefs.setBool('driverIsOnline', nextOnline);
+
+      // Ensure bubble service matches state
+      await _applyOnlineState(nextOnline, updateFirestore: false);
+    } catch (e) {
+      // If anything fails, don't block UI; keep defaults.
+      if (!mounted) return;
+      setState(() => _isOnlineLoaded = true);
+      print('❌ Online init error: $e');
+    }
+  }
+
+  Future<void> _applyOnlineState(bool online, {required bool updateFirestore}) async {
+    // Persist locally
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('driverIsOnline', online);
+    } catch (_) {}
+
+    // Update Firestore activeDriver true/false
+    if (updateFirestore) {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('QuickRunDrivers')
+            .where('phone', isEqualTo: widget.driverAuthId)
+            .limit(1)
+            .get();
+
+        if (snap.docs.isNotEmpty) {
+          final driverId = snap.docs.first.id;
+          await FirebaseFirestore.instance
+              .collection('QuickRunDrivers')
+              .doc(driverId)
+              .update({"activeDriver": online});
+          print("🔥 Firestore updated activeDriver = $online");
+        } else {
+          print("❌ Driver not found for Firestore update");
+        }
+      } catch (e) {
+        print("❌ Firestore update error: $e");
+      }
+    }
+
+    // Start/Stop Floating Service (it will hide while app is foreground)
+    const platform = MethodChannel('floating.chat.head');
+    try {
+      if (online) {
+        print("🟢 Driver ONLINE → Starting bubble...");
+        await platform.invokeMethod("startBubble");
+      } else {
+        print("🔴 Driver OFFLINE → Stopping bubble...");
+        await platform.invokeMethod("stopBubble");
+      }
+    } catch (e) {
+      print("❌ Bubble toggle error: $e");
+    }
+  }
+  Future<void> _fetchTodayOrders() async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+
+      // find driver doc by phone == driverAuthId
+      final snap = await firestore
+          .collection('QuickRunDrivers')
+          .where('phone', isEqualTo: widget.driverAuthId)
+          .get();
+
+      if (snap.docs.isEmpty) {
+        setState(() { _todayOrders = 0; _todayEarning = 0; });
+        return;
+      }
+
+      final driverRef = snap.docs.first.reference;
+
+      // today's date collection name
+      final now = DateTime.now();
+      final dateString = "${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}";
+
+      final ordersSnap = await driverRef.collection(dateString).get();
+
+      final count = ordersSnap.docs.length;
+
+      setState(() {
+        _todayOrders = count;
+        _todayEarning = count * 10;
+      });
+    } catch (e) {
+      print('Error: $e');
+    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
     super.dispose();
-  }
-
-  void _startTimer() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _offlineSeconds++;
-      });
-    });
-  }
-
-  void _stopTimer() {
-    _timer?.cancel();
-  }
-
-  String _formatDuration(int totalSeconds) {
-    final duration = Duration(seconds: totalSeconds);
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes);
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return "$minutes:$seconds";
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_isOnlineLoaded) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF1F0F5),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       backgroundColor: Color(0xFFF1F0F5), // Set the background to dark blue
       appBar: AppBar(
@@ -60,17 +172,49 @@ class _DriverDashboardState extends State<DriverDashboard> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             GestureDetector(
-              onTap: () {
-                setState(() {
-                  _isOnline = !_isOnline;
-                  if (_isOnline) {
-                    // When going online, stop the timer.
-                    _stopTimer();
-                  } else {
-                    // When going offline, start the timer.
-                    _startTimer();
+              onTap: () async {
+                final next = !_isOnline;
+                setState(() => _isOnline = next);
+                await _applyOnlineState(next, updateFirestore: true);
+                try {
+                  Position pos = await Geolocator.getCurrentPosition(
+                      desiredAccuracy: LocationAccuracy.high);
+
+                  final lat = pos.latitude;
+                  final lng = pos.longitude;
+
+                  final now = DateTime.now();
+                  final dateString =
+                      "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+
+                  final snap2 = await FirebaseFirestore.instance
+                      .collection("QuickRunDrivers")
+                      .where("phone", isEqualTo: widget.driverAuthId)
+                      .limit(1)
+                      .get();
+
+                  if (snap2.docs.isNotEmpty) {
+                    final driverId = snap2.docs.first.id;
+
+                    await FirebaseFirestore.instance
+                        .collection("QuickRunDrivers")
+                        .doc(driverId)
+                        .collection("locationActivity")
+                        .doc(dateString)
+                        .collection("clicks")
+                        .add({
+                      "lat": lat,
+                      "lng": lng,
+                      "status": _isOnline ? "online" : "offline",
+                      "clickedAtClient": now.toIso8601String(),
+                      "clickedAt": FieldValue.serverTimestamp(),
+                    });
+
+                    print("🔥 Saved driver click → $lat , $lng status=$_isOnline");
                   }
-                });
+                } catch (e) {
+                  print("❌ Error saving driver click: $e");
+                }
               },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
@@ -113,31 +257,25 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ),
               ),
             ),
-            Row(
-              children: [
-                Text(
-                  "OFFLINE TIME ",
-                  style: GoogleFonts.lexend(
-                    color: Colors.black87,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                Text(
-                  _formatDuration(_offlineSeconds),
-                  style: GoogleFonts.lexend(
-                    color: Colors.amber.shade700,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+            child: Center(
+              child: Text(
+                "This app is intended only for registered QuickRun delivery partners.",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Column(
@@ -190,7 +328,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                               fontSize: 12,
                                             )),
                                         SizedBox(height: 4),
-                                        Text("₹ 4,000",
+                                        Text("₹ $_todayEarning",
                                             style: GoogleFonts.lexend(
                                               color: Color(0xFF6E6E6E),
                                               fontSize: 27,
@@ -211,7 +349,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                             fontSize: 12,
                                           )),
                                       SizedBox(height: 4),
-                                      Text("80",
+                                      Text("$_todayOrders",
                                           style: GoogleFonts.lexend(
                                             color: Color(0xFF6E6E6E),
                                             fontSize: 27,
@@ -226,7 +364,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
                             Container(height: 1,width: double.infinity,color: Color(0xFFF2F2F2),),
 
-                            SizedBox(height: 4),
+                            // SizedBox(height: 4),
                             // Center(
                             //   child: TextButton.icon(
                             //     onPressed: () {},
@@ -268,7 +406,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
               ],
             ),
           ),
-          const Expanded(child: PorterHome()), // Embed the existing PorterHome widget
+          Expanded(child: PorterHome(widget.driverAuthId)),
         ],
       ),
     );

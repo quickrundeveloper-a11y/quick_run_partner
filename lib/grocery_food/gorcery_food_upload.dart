@@ -2,12 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
 class GorceryFoodUpload extends StatefulWidget {
-  const GorceryFoodUpload({super.key});
+  final String driverAuthId;
+  const GorceryFoodUpload({super.key, required this.driverAuthId});
 
   @override
   State<GorceryFoodUpload> createState() => _GorceryFoodUploadState();
@@ -60,6 +60,26 @@ class _GorceryFoodUploadState extends State<GorceryFoodUpload> {
   final List<XFile> _images = [];
 
   bool _saving = false;
+
+  String? _restaurantId;
+  Future<void> _fetchRestaurantIdFromPhone() async {
+    final snap = await FirebaseFirestore.instance.collection('Restaurent_shop').get();
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      if (data['phone'] == widget.driverAuthId) {
+        setState(() {
+          _restaurantId = doc.id;
+        });
+        break;
+      }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRestaurantIdFromPhone();
+  }
 
   @override
   void dispose() {
@@ -175,9 +195,14 @@ class _GorceryFoodUploadState extends State<GorceryFoodUpload> {
         return;
       }
 
-      final userId = FirebaseAuth.instance.currentUser?.uid;
+      final userId = _restaurantId;
+      if (userId == null) {
+        _showSnack('Restaurant ID not resolved');
+        setState(() => _saving = false);
+        return;
+      }
       final imageUrls = <String>[];
-      final storageRef = FirebaseStorage.instance.ref().child('product_images').child(userId ?? 'unknown');
+      final storageRef = FirebaseStorage.instance.ref().child('product_images').child(userId);
 
       for (final image in _images) {
         final fileName = '${DateTime.now().millisecondsSinceEpoch}_${image.name}';

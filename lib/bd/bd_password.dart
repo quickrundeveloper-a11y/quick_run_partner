@@ -96,6 +96,8 @@ class _BdPasswordState extends State<BdPassword> {
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setString("bdId", widget.bdId);
                   await prefs.setString("bdPassword", enteredPass);
+                  await prefs.setString("userType", "BD_executive");
+                  print("BD DEBUG → Logged in BD = ${widget.bdId}");
 
                   Navigator.of(context).push(
                     MaterialPageRoute(

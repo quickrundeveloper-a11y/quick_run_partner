@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/orderOverlayRoot"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/overlay_card_bg"
+        android:elevation="10dp">
+
+        <TextView
+            android:id="@+id/overlayTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="NEW ORDER"
+            android:textAllCaps="true"
+            android:textStyle="bold"
+            android:letterSpacing="0.08"
+            android:textSize="14sp"
+            android:textColor="#111827" />
+
+        <TextView
+            android:id="@+id/overlayOrderId"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="#"
+            android:textStyle="bold"
+            android:textSize="16sp"
+            android:textColor="#374151"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/overlayItem"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Item"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#111827"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/overlayPickup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Pickup:"
+            android:textSize="13sp"
+            android:textColor="#374151"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/overlayDrop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Drop:"
+            android:textSize="13sp"
+            android:textColor="#374151"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <!-- Swipe to accept -->
+        <FrameLayout
+            android:id="@+id/overlaySwipeContainer"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/overlay_swipe_bg"
+            android:padding="4dp">
+
+            <TextView
+                android:id="@+id/overlaySwipeText"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="Swipe to Accept"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:textSize="15sp"
+                android:letterSpacing="0.02" />
+
+            <FrameLayout
+                android:id="@+id/overlaySwipeHandle"
+                android:layout_width="50dp"
+                android:layout_height="46dp"
+                android:layout_gravity="center_vertical|start"
+                android:background="@drawable/overlay_swipe_handle_bg" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>
+
+
