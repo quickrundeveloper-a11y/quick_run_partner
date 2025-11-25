@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "668265951981",
+    "project_id": "quick-run-c74ff",
+    "storage_bucket": "quick-run-c74ff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:668265951981:android:a3c0b3d3a779c896e852e4",
+        "android_client_info": {
+          "package_name": "com.example.quick_run"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBTbJpF4hcn5YqWtoLyPorBP3RVFwHn7Zg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

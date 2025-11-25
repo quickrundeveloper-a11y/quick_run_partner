@@ -1,0 +1,5 @@
+package com.quick.quick_run_driver
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
