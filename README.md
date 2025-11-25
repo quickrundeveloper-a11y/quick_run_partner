@@ -1,20 +1,40 @@
-# quick_run_driver
-
-A new Flutter project.
-
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
 # quick_run_partner
-# quick_run_partner
-# quick_run_partner
-# quick_run_partner
+
+A Flutter application built for store/restaurant partners to manage orders, track status, and handle real-time updates for the Quick Run platform.
+
+---
+
+## 🚀 Features
+
+### 📦 Order Management
+- Receive new orders with sound alert
+- Accept, Preparing, and Ready-to-Pickup order flow
+- Live status updates in real-time
+
+### 🛵 Rider & Customer Coordination
+- Track driver pickup status
+- View delivery partner details
+- Accurate time & distance updates
+
+### 🧾 Store Dashboard
+- Order history
+- Item details, quantity, and pricing overview
+- Auto-refresh UI via Firestore streams
+
+---
+
+## 🛠 Tech Stack
+
+- **Flutter** (Dart)
+- **Firebase Firestore**
+- **Firebase Authentication**
+- **State Management — Provider / GetX** (jo tum use kar rahe ho)
+- **Google Maps / Geocoding (optional)**
+
+---
+
+## 📦 Getting Started
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/quickrundeveloper-a11y/quick_run_partner.git
