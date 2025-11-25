@@ -38,3 +38,4 @@ A Flutter application built for store/restaurant partners to manage orders, trac
 ### 1. Clone the repository
 ```bash
 git clone https://github.com/quickrundeveloper-a11y/quick_run_partner.git
+# quick_run_partner
