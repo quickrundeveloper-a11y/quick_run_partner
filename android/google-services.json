@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "802086575104",
+    "project_id": "quickrun-eat",
+    "storage_bucket": "quickrun-eat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:802086575104:android:9f5d2f84110c03b6758ce5",
+        "android_client_info": {
+          "package_name": "com.example.quickruneat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWfC0Wn4ClqHeFuHaW5yGi5fdcCY61Drs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:802086575104:android:b73cdb49cfa338f5758ce5",
+        "android_client_info": {
+          "package_name": "com.quick.quick_run_driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWfC0Wn4ClqHeFuHaW5yGi5fdcCY61Drs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
