@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'driver_home.dart';
+import 'driver_registration.dart';
 
 class EatLoginPage extends StatefulWidget {
   const EatLoginPage({super.key});
@@ -55,25 +59,55 @@ class _EatLoginPageState extends State<EatLoginPage> {
 
   Future<void> _verifyOtp() async {
     final raw = _phoneCtrl.text.trim();
-    if (!kReleaseMode) {
-      for (final c in _otpCtrls) {
-        if (c.text.isEmpty) c.text = '1';
-      }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logged in ✅')));
-      return;
-    }
-    if (_otpValue.length != _otpLength) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter the 6-digit OTP')));
-      return;
-    }
     setState(() => _verifying = true);
+    
     try {
-      debugPrint("✅ OTP verified for $raw");
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logged in ✅')));
+      if (!kReleaseMode) {
+        for (final c in _otpCtrls) {
+          if (c.text.isEmpty) c.text = '1';
+        }
+      } else {
+        if (_otpValue.length != _otpLength) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter the 6-digit OTP')));
+          return;
+        }
+      }
+
+      // Check if driver exists in Firestore
+      final driverDoc = await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(raw)
+          .get();
+
+      if (mounted) {
+        if (driverDoc.exists) {
+          // Driver exists, go to Home
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('is_logged_in', true);
+          await prefs.setString('user_phone', raw);
+          await prefs.setString('user_name', driverDoc.data()?['name'] ?? '');
+          
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const DriverHome()),
+          );
+        } else {
+          // New driver, go to Registration
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => DriverRegistrationPage(phoneNumber: raw)),
+          );
+        }
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Verification UI error: $e")));
+      debugPrint("❌ Verification error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Verification error: $e")),
+        );
+      }
     } finally {
-      setState(() => _verifying = false);
+      if (mounted) setState(() => _verifying = false);
     }
   }
 
@@ -253,25 +287,26 @@ class _EatLoginPageState extends State<EatLoginPage> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: List.generate(
                               _otpLength,
-                              (i) => Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
-                                child: Container(
-                                  width: 48,
-                                  height: 60,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF4F4F4),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: _otpCtrls[i].text.isNotEmpty ? Colors.black87 : Colors.black12,
-                                      width: _otpCtrls[i].text.isNotEmpty ? 1.2 : 1,
+                              (i) => Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                                  child: Container(
+                                    height: 56,
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF4F4F4),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: _otpCtrls[i].text.isNotEmpty ? Colors.black87 : Colors.black12,
+                                        width: _otpCtrls[i].text.isNotEmpty ? 1.2 : 1,
+                                      ),
                                     ),
-                                  ),
-                                  child: ValueListenableBuilder<TextEditingValue>(
-                                    valueListenable: _otpCtrls[i],
-                                    builder: (context, value, _) => Text(
-                                      value.text,
-                                      style: GoogleFonts.kumbhSans(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.black),
+                                    child: ValueListenableBuilder<TextEditingValue>(
+                                      valueListenable: _otpCtrls[i],
+                                      builder: (context, value, _) => Text(
+                                        value.text,
+                                        style: GoogleFonts.kumbhSans(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.black),
+                                      ),
                                     ),
                                   ),
                                 ),

@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.media.MediaPlayer
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FieldValue
@@ -28,6 +29,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.Priority
 import java.io.File
 import org.json.JSONObject
 
@@ -35,31 +37,10 @@ class FloatingService : Service() {
     
     private fun logDebug(location: String, message: String, data: Map<String, Any?>, hypothesisId: String) {
         try {
-            // Try to write to external storage first, fallback to internal storage
-            val logDir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                getExternalFilesDir(null) ?: filesDir
-            } else {
-                getExternalFilesDir(null) ?: filesDir
-            }
-            
-            val logFile = File(logDir, "debug.log")
-            val logEntry = JSONObject().apply {
-                put("location", location)
-                put("message", message)
-                put("data", JSONObject(data))
-                put("timestamp", System.currentTimeMillis())
-                put("sessionId", "debug-session")
-                put("runId", "run1")
-                put("hypothesisId", hypothesisId)
-            }
-            logFile.appendText("${logEntry.toString()}\n")
-            
-            // Also log to Android Log for visibility
-            Log.d("FloatingService", "[$hypothesisId] $location: $message - ${logEntry.toString()}")
-        } catch (e: Exception) {
-            Log.e("FloatingService", "Failed to write debug log: ${e.message}", e)
-            // Fallback: log to Android Log only
+            // Log to Android Log only for now to avoid potential file I/O issues during high frequency updates
             Log.d("FloatingService", "[$hypothesisId] $location: $message - ${data.toString()}")
+        } catch (e: Exception) {
+            Log.e("FloatingService", "Failed to log debug: ${e.message}", e)
         }
     }
 
@@ -94,6 +75,8 @@ class FloatingService : Service() {
     private var currentCustomerId: String? = null
     private var currentOrderId: String? = null
     private var driverDocId: String? = null
+    private var isEatDriver: Boolean = false
+    private var isFetchingDriverId = false
     private val handler = Handler(Looper.getMainLooper())
     private var locationUpdateRunnable: Runnable? = null
     private var driverDetailsUpdateRunnable: Runnable? = null
@@ -108,13 +91,18 @@ class FloatingService : Service() {
         try {
             Log.d("FloatingService", "onCreate() called")
             
+            // 1. MUST start foreground notification IMMEDIATELY for Android 14+ (API 34)
+            startForegroundServiceNotification()
+
             if (FirebaseApp.getApps(this).isEmpty()) {
                 FirebaseApp.initializeApp(this)
             }
 
             val sharedPref = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            cachedDriverAuthId = sharedPref.getString("flutter.driverAuthID", null)
-            Log.d("FloatingService", "Cached driverAuthId = $cachedDriverAuthId")
+            cachedDriverAuthId = sharedPref.getString("flutter.driverAuthID", null) 
+                ?: sharedPref.getString("flutter.user_phone", null)
+            isEatDriver = sharedPref.getBoolean("flutter.isEatDriver", false)
+            Log.d("FloatingService", "Cached driverAuthId = $cachedDriverAuthId, isEatDriver = $isEatDriver")
 
             val userType = sharedPref.getString("flutter.userType", null)
             // Sellers should NOT track/write location. This service is used only for overlay + sound.
@@ -136,7 +124,6 @@ class FloatingService : Service() {
                 fetchDriverDocId()
             }
             
-            startForegroundServiceNotification()
             showFloatingBubble()
             
             isServiceInitialized = true
@@ -561,37 +548,25 @@ class FloatingService : Service() {
                 fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
             }
             
-            // Check if there's an accepted order
-            val hasAcceptedOrder = currentCustomerId != null && currentOrderId != null
-            
-            // Use faster updates (10 seconds) if order is accepted, otherwise 15 minutes
-            val locationRequest = LocationRequest.create().apply {
-                if (hasAcceptedOrder) {
-                    interval = 10000 // 10 seconds for active orders
-                    fastestInterval = 5000 // 5 seconds minimum
-                    Log.d("FloatingService", "Using FAST location updates (10s) - Order active")
-                } else {
-                    interval = 15 * 60 * 1000 // 15 minutes for normal operation
-                    fastestInterval = 10 * 60 * 1000 // 10 minutes minimum
-                    Log.d("FloatingService", "Using SLOW location updates (15min) - No active order")
-                }
-                priority = LocationRequest.PRIORITY_HIGH_ACCURACY
-            }
-            
             // Remove existing location updates if any
             locationCallback?.let { 
                 fusedLocationClient?.removeLocationUpdates(it)
             }
         
-        // Create location callback
-        val locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                val loc = locationResult.lastLocation
-                if (loc != null) {
+            // TESTING: Set to 10 seconds to reduce resource usage
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000)
+                .setMinUpdateIntervalMillis(5000)
+                .build()
+            
+            Log.d("FloatingService", "Location tracking started (10s interval)")
+            
+            // Create location callback
+            val newCallback = object : LocationCallback() {
+                override fun onLocationResult(locationResult: LocationResult) {
+                    val loc = locationResult.lastLocation ?: return
                     val lat = loc.latitude
                     val lng = loc.longitude
                     
-                    // Store last known location
                     lastKnownLat = lat
                     lastKnownLng = lng
 
@@ -599,93 +574,54 @@ class FloatingService : Service() {
                     val userType = sharedPref.getString("flutter.userType", null)
                     val bdId = sharedPref.getString("flutter.bdId", null)
                     
-                    // Update order location if order is accepted (only acceptedDriverDetails.driverLatLng)
                     if (currentCustomerId != null && currentOrderId != null) {
-                        // #region agent log
-                        logDebug("FloatingService.kt:189", "Location callback - before update", mapOf("lat" to lat, "lng" to lng, "customerId" to currentCustomerId, "orderId" to currentOrderId), "B")
-                        // #endregion
-                        Log.d("FloatingService", "Location received - updating order: lat=$lat, lng=$lng")
                         updateDriverDetailsLocation(lat, lng)
-                    } else {
-                        // #region agent log
-                        logDebug("FloatingService.kt:192", "Location callback - no order", mapOf("customerId" to (currentCustomerId ?: "null"), "orderId" to (currentOrderId ?: "null")), "B")
-                        // #endregion
                     }
 
-                    // BD_executive location tracking (unchanged)
                     if (userType == "BD_executive" && bdId != null) {
-                        val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd")
-                            .format(java.util.Date())
-
-                        val bdLocationEntry = hashMapOf(
-                            "lat" to lat,
-                            "lng" to lng,
-                            "timestamp" to FieldValue.serverTimestamp()
-                        )
-
-                        val db = FirebaseFirestore.getInstance()
-                        val bdDocRef = db.collection("bd_profiles")
-                            .document(bdId)
-                            .collection("locationActivity")
-                            .document(todayDate)
-                            .collection("entries")
-
-                        bdDocRef.add(bdLocationEntry)
-                            .addOnSuccessListener {
-                                Log.d("FloatingService", "BD Location entry saved for $bdId")
-                            }
-                            .addOnFailureListener { e ->
-                                Log.e("FloatingService", "Failed to save BD location entry", e)
-                            }
+                        updateBDLocation(lat, lng, bdId)
                     }
 
-                    // Driver location history tracking - ONLY for background/bubble tracking
-                    // Should NOT record when there's an active order (live tracking is separate)
-                    // History is independent of current_order updates
-                    if (driverDocId != null && currentCustomerId == null && currentOrderId == null) {
-                        writeDriverLocationHistory(lat, lng)
-                    } else if (driverDocId == null) {
-                        Log.w("FloatingService", "driverDocId not cached yet, skipping location history write")
+                    if (currentCustomerId == null && currentOrderId == null) {
+                        if (driverDocId != null) {
+                            writeDriverLocationHistory(lat, lng)
+                        } else {
+                            fetchDriverDocId()
+                        }
                     }
                 }
             }
-        }
-        
-            // Request location updates
-            fusedLocationClient?.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
             
-            // Store callback reference
-            this.locationCallback = locationCallback
+            fusedLocationClient?.requestLocationUpdates(locationRequest, newCallback, Looper.getMainLooper())
+            this.locationCallback = newCallback
             
-            // Get last known location immediately if we have an accepted order
-            if (hasAcceptedOrder) {
-                try {
-                    fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
-                        if (location != null) {
-                            val lat = location.latitude
-                            val lng = location.longitude
-                            lastKnownLat = lat
-                            lastKnownLng = lng
-                            Log.d("FloatingService", "Got last known location: lat=$lat, lng=$lng")
-                            // Update immediately (only acceptedDriverDetails.driverLatLng)
-                            updateDriverDetailsLocation(lat, lng)
-                        } else {
-                            Log.w("FloatingService", "Last known location is null")
-                        }
-                    }?.addOnFailureListener { e ->
-                        Log.e("FloatingService", "Failed to get last known location", e)
+            if (currentCustomerId != null && currentOrderId != null) {
+                fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
+                    if (location != null) {
+                        lastKnownLat = location.latitude
+                        lastKnownLng = location.longitude
+                        updateDriverDetailsLocation(lastKnownLat!!, lastKnownLng!!)
                     }
-                } catch (e: Exception) {
-                    Log.e("FloatingService", "Error getting last known location", e)
                 }
-                // Start periodic updates
                 startOrderLocationUpdates()
-            } else {
-                stopOrderLocationUpdates()
             }
         } catch (e: Exception) {
             Log.e("FloatingService", "Error in startLocationTracking()", e)
         }
+    }
+
+    private fun updateBDLocation(lat: Double, lng: Double, bdId: String) {
+        val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val db = FirebaseFirestore.getInstance()
+        val entry = hashMapOf(
+            "lat" to lat,
+            "lng" to lng,
+            "timestamp" to FieldValue.serverTimestamp()
+        )
+        db.collection("bd_profiles").document(bdId)
+            .collection("locationActivity").document(todayDate)
+            .collection("entries").add(entry)
+            .addOnFailureListener { e -> Log.e("FloatingService", "BD location update failed", e) }
     }
     
     // Method to set accepted order information
@@ -766,21 +702,55 @@ class FloatingService : Service() {
     }
     
     private fun fetchDriverDocId() {
-        val driverAuthId = cachedDriverAuthId ?: return
+        if (isFetchingDriverId || cachedDriverAuthId == null) return
+        
+        isFetchingDriverId = true
+        val driverAuthId = cachedDriverAuthId!!
         val db = FirebaseFirestore.getInstance()
         
-        db.collection("QuickRunDrivers")
-            .whereEqualTo("phone", driverAuthId)
-            .limit(1)
+        Log.d("FloatingService", "Fetching driver ID for $driverAuthId")
+        
+        // Try 'drivers' collection first (new eat app)
+        db.collection("drivers")
+            .document(driverAuthId)
             .get()
-            .addOnSuccessListener { result ->
-                if (!result.isEmpty) {
-                    driverDocId = result.documents[0].id
-                    Log.d("FloatingService", "Driver Doc ID cached: $driverDocId")
+            .addOnSuccessListener { doc ->
+                if (doc.exists()) {
+                    driverDocId = driverAuthId // For 'drivers' collection, docId is phone number
+                    isEatDriver = true
+                    
+                    // Persist this info for when app is killed/restarted
+                    val sharedPref = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                    sharedPref.edit().putBoolean("flutter.isEatDriver", true).apply()
+                    
+                    Log.d("FloatingService", "Eat Driver detected: $driverDocId")
+                    isFetchingDriverId = false
+                } else {
+                    // Fallback to 'QuickRunDrivers' collection (old porter app)
+                    db.collection("QuickRunDrivers")
+                        .whereEqualTo("phone", driverAuthId)
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener { result ->
+                            if (!result.isEmpty) {
+                                driverDocId = result.documents[0].id
+                                isEatDriver = false
+                                
+                                val sharedPref = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                                sharedPref.edit().putBoolean("flutter.isEatDriver", false).apply()
+                                
+                                Log.d("FloatingService", "Porter Driver Doc ID cached: $driverDocId")
+                            }
+                            isFetchingDriverId = false
+                        }
+                        .addOnFailureListener {
+                            isFetchingDriverId = false
+                        }
                 }
             }
             .addOnFailureListener { e ->
                 Log.e("FloatingService", "Error fetching driver document", e)
+                isFetchingDriverId = false
             }
     }
     
@@ -789,6 +759,11 @@ class FloatingService : Service() {
         stopOrderLocationUpdates()
         
         Log.d("FloatingService", "Starting periodic order location updates")
+        
+        // Ensure driverDocId is available for active order updates
+        if (driverDocId == null) {
+            fetchDriverDocId()
+        }
         
         // Update acceptedDriverDetails.driverLatLng every 10 seconds
         locationUpdateRunnable = object : Runnable {
@@ -802,9 +777,9 @@ class FloatingService : Service() {
                     Log.d("FloatingService", "Periodic update: acceptedDriverDetails.driverLatLng")
                     updateDriverDetailsLocation(lastKnownLat!!, lastKnownLng!!)
                 } else {
-                    Log.w("FloatingService", "Skipping periodic update - missing data: customerId=${currentCustomerId != null}, orderId=${currentOrderId != null}, lat=${lastKnownLat != null}, lng=${lastKnownLng != null}")
+                    Log.w("FloatingService", "Skipping periodic update - missing data")
                 }
-                handler.postDelayed(this, 10000) // 10 seconds
+                handler.postDelayed(this, 10000) // 10 seconds to reduce resource usage
             }
         }
         handler.post(locationUpdateRunnable!!)
@@ -825,103 +800,78 @@ class FloatingService : Service() {
     }
     
     private fun updateDriverDetailsLocation(lat: Double, lng: Double) {
-        // #region agent log
-        logDebug("FloatingService.kt:416", "updateDriverDetailsLocation - entry", mapOf("lat" to lat, "lng" to lng, "customerId" to currentCustomerId, "orderId" to currentOrderId), "C")
-        // #endregion
+        val cid = currentCustomerId
+        val oid = currentOrderId
         
-        if (currentCustomerId == null || currentOrderId == null) {
-            // #region agent log
-            logDebug("FloatingService.kt:418", "updateDriverDetailsLocation - null check failed", mapOf("customerId" to (currentCustomerId ?: "null"), "orderId" to (currentOrderId ?: "null")), "C")
-            // #endregion
-            Log.w("FloatingService", "Cannot update driver details location: customerId or orderId is null")
+        if (cid == null || oid == null) {
+            Log.w("FloatingService", "Skipping driver details update: customerId or orderId is null")
             return
         }
         
         val db = FirebaseFirestore.getInstance()
-        val orderRef = db.collection("Customer")
-            .document(currentCustomerId!!)
-            .collection("current_order")
-            .document(currentOrderId!!)
+        val collectionName = if (isEatDriver) "Customers" else "Customer"
+        val subCollectionName = if (isEatDriver) "currentOrder" else "current_order"
         
-        // Update acceptedDriverDetails.driverLatLng and remove direct driverLatLng if it exists
+        val orderRef = db.collection(collectionName)
+            .document(cid)
+            .collection(subCollectionName)
+            .document(oid)
+        
         val updateData = mapOf(
             "acceptedDriverDetails.driverLatLng" to mapOf(
                 "lat" to lat,
                 "lng" to lng,
                 "timestamp" to FieldValue.serverTimestamp()
             ),
-            "driverLatLng" to FieldValue.delete() // Remove direct driverLatLng field if it exists
+            "driverLatLng" to FieldValue.delete(),
+            "driverDetails" to FieldValue.delete() // Remove the old field
         )
         
-        // #region agent log
-        logDebug("FloatingService.kt:436", "updateDriverDetailsLocation - before Firestore", mapOf("path" to "Customer/$currentCustomerId/current_order/$currentOrderId"), "C")
-        // #endregion
-        
-        Log.d("FloatingService", "Updating acceptedDriverDetails.driverLatLng and removing direct driverLatLng at Customer/$currentCustomerId/current_order/$currentOrderId")
+        Log.d("FloatingService", "Updating location at $collectionName/$cid/$subCollectionName/$oid")
         orderRef.update(updateData)
-        .addOnSuccessListener {
-            // #region agent log
-            logDebug("FloatingService.kt:439", "updateDriverDetailsLocation - success", mapOf("lat" to lat, "lng" to lng), "C")
-            // #endregion
-            Log.d("FloatingService", "✓ Driver details driverLatLng updated successfully: lat=$lat, lng=$lng")
-        }
-        .addOnFailureListener { e ->
-            // #region agent log
-            logDebug("FloatingService.kt:442", "updateDriverDetailsLocation - failure", mapOf("error" to (e.message ?: "unknown"), "errorClass" to e.javaClass.simpleName), "C")
-            // #endregion
-            Log.e("FloatingService", "✗ Failed to update driver details driverLatLng", e)
-            Log.e("FloatingService", "Error details: ${e.message}")
-        }
+            .addOnSuccessListener {
+                Log.d("FloatingService", "✓ Driver details updated successfully")
+            }
+            .addOnFailureListener { e ->
+                Log.e("FloatingService", "✗ Failed to update driver details: ${e.message}")
+            }
     }
     
     /**
-     * Writes driver location to history (locationActivity).
-     * This is INDEPENDENT of live order tracking and is called from background/bubble tracking flow.
-     * Does NOT update Customer/current_order.
+     * Updates driver location in the main document.
+     * Called from background/bubble tracking flow every 5 seconds.
+     */
+    /**
+     * Updates driver location in the main document.
+     * Called from background/bubble tracking flow every 5 seconds.
      */
     private fun writeDriverLocationHistory(lat: Double, lng: Double) {
         if (driverDocId == null) {
-            Log.w("FloatingService", "Cannot write location history: driverDocId is null")
+            fetchDriverDocId()
             return
         }
         
-        // Check if location has changed since last write to prevent duplicate writes
-        val hasLocationChanged = lastWrittenLat == null || lastWrittenLng == null ||
-                kotlin.math.abs(lastWrittenLat!! - lat) > 0.000001 ||
-                kotlin.math.abs(lastWrittenLng!! - lng) > 0.000001
+        val db = FirebaseFirestore.getInstance()
+        val collectionName = if (isEatDriver) "drivers" else "QuickRunDrivers"
         
-        if (!hasLocationChanged) {
-            Log.d("FloatingService", "Location unchanged, skipping history write")
-            return
-        }
-        
-        // Create date-based docId (yyyy-MM-dd format)
-        val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd")
-            .format(java.util.Date())
-
-        // Create a new location log entry
-        val locationEntry = hashMapOf(
+        // Update main document only
+        val updateData = hashMapOf(
             "lat" to lat,
             "lng" to lng,
-            "timestamp" to FieldValue.serverTimestamp()
+            "lastUpdated" to FieldValue.serverTimestamp(),
+            "trackingState" to "background"
         )
 
-        // Directly write using cached driverDocId - NO query needed
-        val db = FirebaseFirestore.getInstance()
-        db.collection("QuickRunDrivers")
+        db.collection(collectionName)
             .document(driverDocId!!)
-            .collection("locationActivity")
-            .document(todayDate)
-            .collection("entries")
-            .add(locationEntry)
+            .update(updateData as Map<String, Any>)
             .addOnSuccessListener {
-                // Update last written location after successful write
                 lastWrittenLat = lat
                 lastWrittenLng = lng
-                Log.d("FloatingService", "Location history entry saved for $driverDocId")
+                Log.d("FloatingService", "Location updated in main doc: $driverDocId in $collectionName")
             }
             .addOnFailureListener { e ->
-                Log.e("FloatingService", "Failed to save location history entry", e)
+                Log.e("FloatingService", "Failed to update main doc in $collectionName", e)
             }
     }
 
@@ -982,9 +932,15 @@ class FloatingService : Service() {
             .setContentTitle("You are online")
             .setContentText("We will update you for you orders")
             .setSmallIcon(R.mipmap.ic_launcher)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-        startForeground(1, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        } else {
+            startForeground(1, notification)
+        }
     }
 
     override fun onDestroy() {
@@ -1013,7 +969,10 @@ class FloatingService : Service() {
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
-            Log.d("FloatingService", "onStartCommand() called with intent: ${intent?.action}")
+            Log.d("FloatingService", "onStartCommand() called")
+            
+            // Ensure foreground state is maintained on every start command
+            startForegroundServiceNotification()
             
             // Toggle bubble indicator for new orders (sent from Flutter)
             intent?.let {

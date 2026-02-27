@@ -11,6 +11,7 @@ import 'package:quick_run_driver/porter_driver/driver_dashboard.dart';
 import 'package:quick_run_driver/seller_bottomnav.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:quick_run_driver/eat/eat_login.dart';
+import 'package:quick_run_driver/eat/driver_home.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -391,12 +392,19 @@ class MyApp extends StatelessWidget {
           }
           final driverAuthId = prefs.getString("driverAuthID");
           final userType = prefs.getString("userType");
-          print("MAIN DEBUG → driverAuthId = $driverAuthId | userType = $userType");
+          final isLoggedInEat = prefs.getBool('is_logged_in') ?? false;
+
+          print("MAIN DEBUG → driverAuthId = $driverAuthId | userType = $userType | eatLoggedIn = $isLoggedInEat");
+          
+          if (isLoggedInEat) {
+            return const DriverHome();
+          }
+
           if (driverAuthId != null && driverAuthId.isNotEmpty && userType != null) {
             if (userType == "driver") return DriverDashboard(driverAuthId);
             if (userType == "seller") return SellerBottomnav(driverAuthId);
           }
-          return EatLoginPage();
+          return const EatLoginPage();
         },
       ),
     );

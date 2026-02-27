@@ -26,7 +26,8 @@
             android:name=".FloatingService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="location"
+            android:stopWithTask="false" />
 
         <!-- Native FCM receiver: required for showing overlay + ringing when Flutter is terminated -->
         <service
